@@ -1,0 +1,8 @@
+{
+  "name": "Chef Compliance Audit System",
+  "description": "A comprehensive mobile-first audit application for tracking chef compliance, hygiene standards, and food preparation quality across multiple properties.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
