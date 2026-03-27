@@ -98,6 +98,28 @@ const AdminDashboard: React.FC<Props> = ({
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+  useEffect(() => {
+  const fetchData = async () => {
+    try {
+  const data = await getAudits();
+
+  const formatted = data.slice(1).map((row: any) => ({
+        id: row[0],
+        supervisorId: row[1],
+        propertyId: row[2],
+        complianceScore: Number(row[3]),
+        datetime: row[4]
+      }));
+
+      setLiveAudits(formatted);
+    } catch (err) {
+      console.error("Error fetching audits:", err);
+    }
+  };
+
+  fetchData();
+}, []);
+
 
   const fieldUsers = useMemo(() => {
     return users.filter(u => u.role === UserRole.SUPERVISOR || u.role === UserRole.MANAGER);
