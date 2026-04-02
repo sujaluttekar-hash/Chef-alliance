@@ -1,8 +1,8 @@
-
 export enum UserRole {
   SUPERVISOR = 'SUPERVISOR',
   MANAGER = 'MANAGER',
-  ADMIN = 'ADMIN'
+  ADMIN = 'ADMIN',
+  VENDOR = 'VENDOR'
 }
 
 export interface User {
@@ -10,7 +10,7 @@ export interface User {
   name: string;
   role: UserRole;
   phone: string;
-  assignedSquadIds?: string[]; // IDs of Properties/Squads the user is assigned to
+  assignedSquadIds?: string[];
 }
 
 export interface Vendor {
@@ -35,7 +35,7 @@ export interface AuditQuestion {
 
 export interface AuditResponse {
   questionId: string;
-  answer: boolean; // true for Yes, false for No
+  answer: boolean;
   photoUrl?: string;
   photoMetadata?: {
     timestamp: string;
@@ -47,7 +47,7 @@ export interface AuditResponse {
 export interface Audit {
   id: string;
   bookingId: string;
-  propertyId: string; // Used for "Squad"
+  propertyId: string;
   supervisorId: string;
   vendorName: string;
   datetime: string;
@@ -70,8 +70,8 @@ export interface VendorAllocation {
   vendorId: string;
   squadId: string;
   supervisorId: string;
-  date: string; // YYYY-MM-DD
-  type: string; // Dynamic status name from StatusRule
+  date: string;
+  type: string;
   timestamp: string;
 }
 
@@ -105,11 +105,52 @@ export interface VillaAudit {
   supervisorId: string;
   status: 'PENDING' | 'COMPLETED';
   dateAssigned: string;
-  
-  // Completion data
   serviceType?: 'COOKING' | 'DELIVERY';
-  inventoryFileUrl?: string; // Mock for PDF
+  inventoryFileUrl?: string;
   inventoryFileName?: string;
-  kitchenPhotos?: string[]; // Array of 3 photo URLs
+  kitchenPhotos?: string[];
   completionDate?: string;
+}
+
+// NEW: Vendor Audit Post
+export interface VendorAuditPost {
+  id: string;
+  vendorId: string;
+  vendorName: string;
+  title: string;
+  description: string;
+  photos: string[]; // base64 data URLs
+  createdAt: string;
+  squadId?: string;
+}
+
+// ── Chef Villa Audit (room-by-room with photos) ──────────────────────────────
+export interface ChecklistItem {
+  item: string;
+  checked: boolean;
+}
+
+export interface ChefRoomAudit {
+  roomId: string;
+  label: string;
+  photos: string[];       // base64 data URLs
+  notes: string;
+  checklist: ChecklistItem[];
+  completed: boolean;
+}
+
+export interface ChefVillaAuditRecord {
+  id: string;
+  chefId: string;
+  chefName: string;
+  propertyId: string;
+  propertyName: string;
+  roomAudits: ChefRoomAudit[];
+  overallNotes: string;
+  totalPhotos: number;
+  completedRooms: number;
+  lat: number;
+  lng: number;
+  submittedAt: string;
+  status: 'SUBMITTED';
 }
