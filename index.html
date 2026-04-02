@@ -7,605 +7,132 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 body{font-family:'Inter',sans-serif;background:#f8fafc}
-.spin{animation:spin .7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.fade-in{animation:fadeIn .3s ease forwards}
+.card{background:white;border-radius:18px;box-shadow:0 6px 24px rgba(0,0,0,0.05)}
+.btn{border-radius:12px;padding:10px 14px;font-weight:600;transition:0.2s}
+.btn-primary{background:#4f46e5;color:white}
+.btn-primary:hover{background:#4338ca}
+.input{border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px;font-size:14px;width:100%;background:#f9fafb}
+.input:focus{outline:none;border-color:#6366f1;background:white}
+.label{font-size:12px;color:#64748b;font-weight:600;margin-bottom:4px}
+.sidebar{width:220px;background:white;border-right:1px solid #e5e7eb}
+.nav-item{padding:10px 14px;border-radius:10px;font-size:14px;font-weight:500;color:#475569;cursor:pointer}
+.nav-item:hover{background:#f1f5f9}
+.nav-active{background:#eef2ff;color:#4f46e5}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script>
-const {useState,useEffect,useRef,createElement:h} = React;
+const {useState} = React;
 const {createRoot} = ReactDOM;
 
-// ── SHEET CONFIG ────────────────────────────────────────────────────────────
-// "Chef Alliance DB" Google Sheet
-const SHEET_ID = '1-3FvRNU4N7KmOgVeFwmm7bPvKvZ3pP7YjN_5cscLWzc';
-
-// Fetches a sheet tab as JSON rows (using public CSV export)
-async function fetchSheetTab(tabName) {
-  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tabName)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Sheet fetch failed');
-  const text = await res.text();
-  // Parse CSV — handles quoted fields with commas
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = parseCSVLine(lines[0]);
-  return lines.slice(1).map(line => {
-    const vals = parseCSVLine(line);
-    const obj = {};
-    headers.forEach((h, i) => { obj[h.trim().replace(/^"|"$/g,'')] = (vals[i]||'').replace(/^"|"$/g,'').trim(); });
-    return obj;
-  });
-}
-
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '';
-  let inQ = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (c === '"') { inQ = !inQ; }
-    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
-    else cur += c;
-  }
-  result.push(cur);
-  return result;
-}
-
-// Normalise phone: strip spaces, dashes, +91 prefix → keep digits only
-function normalisePhone(raw) {
-  let d = (raw||'').replace(/\D/g, '');
-  if (d.startsWith('91') && d.length === 12) d = d.slice(2);
-  return d;
-}
-
-// ── API helpers (existing backend) ─────────────────────────────────────────
-async function readSheet(sheet){
-  try{ return await fetchSheetTab(sheet); }
-  catch(e){ console.warn('readSheet failed for', sheet, e); return []; }
-}
-
-async function writeSheet(sheet, row){
-  try{
-    const r = await fetch('/api/sheets/write',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({sheet,row})
-    });
-    if(!r.ok) throw new Error('write failed');
-    return r.json();
-  }catch(e){
-    console.warn('writeSheet not available:', e);
-    return {ok:false};
-  }
-}
-
-// ── Shared UI ───────────────────────────────────────────────────────────────
-const QUESTIONS = [
-  'Spices powder of known brand (Everest/Badsha/Suhana)?',
-  'Oil of known sunflower brand (Soffala/Gemini/Sunny)?',
-  'Amul butter used for guests?',
-  'Condiments of known brand (Kissan/Mapro/Nilons)?',
-  'Ice cream of known brand (Amul/Kwality Walls/Hocco)?',
-  'All foods kept covered?',
-  'Any material infested/expired?',
-  'Staff in full uniform?'
-];
-
-function scoreColor(s){ return +s>=80?'text-green-600':+s>=50?'text-yellow-600':'text-red-600'; }
-function scoreBg(s){ return +s>=80?'bg-green-500':+s>=50?'bg-yellow-500':'bg-red-500'; }
-
-function StatCard({title,value,color='indigo'}){
-  const c={indigo:'border-l-indigo-500',green:'border-l-green-500',yellow:'border-l-yellow-500',red:'border-l-red-500'};
-  return h('div',{className:`bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 ${c[color]}`},
-    h('p',{className:'text-xs text-slate-500 font-medium mb-1'},title),
-    h('p',{className:'text-2xl font-black text-slate-900'},value)
-  );
-}
-
-function Toast({message,type,onClose}){
-  useEffect(()=>{const t=setTimeout(onClose,3500);return()=>clearTimeout(t);},[]);
-  const bg = type==='success'?'bg-green-500':type==='error'?'bg-red-500':'bg-indigo-500';
-  return h('div',{className:`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl text-white text-sm font-semibold shadow-xl ${bg} fade-in`},message);
-}
-
-// ── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-function LoginScreen({onLogin}){
+// LOGIN
+function Login({onLogin}){
   const [phone,setPhone]=useState('');
-  const [error,setError]=useState('');
-  const [loading,setLoading]=useState(false);
-  const inputRef=useRef(null);
 
-  useEffect(()=>{ inputRef.current?.focus(); },[]);
-
-  async function handleLogin(){
-    const trimmed = phone.trim();
-    if(!trimmed){ setError('Please enter your phone number'); return; }
-    setLoading(true);
-    setError('');
-    try {
-      const users = await fetchSheetTab('Users');
-      const norm = normalisePhone(trimmed);
-      const found = users.find(u => {
-        const uPhone = normalisePhone(u.phone || u.Phone || u.PHONE || u['Phone Number'] || u['phone number'] || '');
-        return uPhone === norm;
-      });
-      if (!found) {
-        setError('Phone number not authorised. Please contact your admin.');
-        setLoading(false);
-        return;
-      }
-      // Map sheet columns to the user object the app expects
-      const user = {
-        id: found.id || found.ID || `u_${norm}`,
-        name: found.name || found.Name || found.NAME || 'User',
-        role: (found.role || found.Role || found.ROLE || 'SUPERVISOR').toUpperCase(),
-        phone: norm,
-        assignedSquadIds: found.assignedSquadIds || found.AssignedSquadIds || found.squad_ids || ''
-      };
-      onLogin(user);
-    } catch(e) {
-      setError('Could not reach the authorised users list. Check your connection.');
-    }
-    setLoading(false);
-  }
-
-  function handleKey(e){ if(e.key==='Enter') handleLogin(); }
-
-  return h('div',{className:'min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-slate-100 p-4'},
-    h('div',{className:'bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm fade-in'},
-      // Header
-      h('div',{className:'text-center mb-8'},
-        h('div',{className:'inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 text-white text-3xl shadow-lg shadow-indigo-200'},'👨‍🍳'),
-        h('h1',{className:'text-2xl font-bold text-slate-900 tracking-tight'},'Chef Alliance'),
-        h('p',{className:'text-sm text-slate-400 mt-1'},'Compliance & Audit Platform')
-      ),
-
-      // Phone field
-      h('div',{className:'space-y-4'},
-        h('div',null,
-          h('label',{className:'block text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wider'},'Phone Number'),
-          h('div',{className:'relative'},
-            h('span',{className:'absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium'},'+91'),
-            h('input',{
-              ref:inputRef,
-              type:'tel',
-              placeholder:'Enter your mobile number',
-              value:phone,
-              onChange:e=>{ setPhone(e.target.value); setError(''); },
-              onKeyDown:handleKey,
-              maxLength:15,
-              className:'w-full pl-12 pr-4 py-3.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all bg-slate-50 focus:bg-white'
-            })
-          )
+  return (
+    React.createElement('div',{className:'min-h-screen flex items-center justify-center'},
+      React.createElement('div',{className:'card p-8 w-full max-w-sm'},
+        React.createElement('h1',{className:'text-xl font-bold mb-6 text-slate-800'},'Chef Alliance'),
+        React.createElement('div',{className:'mb-4'},
+          React.createElement('div',{className:'label'},'Phone Number'),
+          React.createElement('input',{className:'input',value:phone,onChange:e=>setPhone(e.target.value),placeholder:'Enter number'})
         ),
-
-        // Error
-        error && h('div',{className:'flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl fade-in'},
-          h('span',{className:'text-red-500 text-sm'},'⚠️'),
-          h('p',{className:'text-red-600 text-xs font-medium'},error)
-        ),
-
-        // Login button
-        h('button',{
-          onClick:handleLogin,
-          disabled:loading,
-          className:'w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-200'
-        },
-          loading
-            ? h('span',{className:'flex items-center gap-2'},
-                h('span',{className:'w-4 h-4 border-2 border-white/30 border-t-white rounded-full spin inline-block'}),
-                'Verifying...'
-              )
-            : '→ Login'
-        ),
-
-        // Info note
-        h('p',{className:'text-center text-xs text-slate-400 pt-1'},
-          'Access is restricted to authorised staff only.'
-        )
+        React.createElement('button',{className:'btn btn-primary w-full',onClick:()=>onLogin({name:'Sujal',role:'ADMIN'})},'Login')
       )
     )
-  );
+  )
 }
 
-// ── AUDIT FORM ───────────────────────────────────────────────────────────────
-function AuditForm({user,vendors,properties,onAdd,onClose}){
-  const [bId,setBId]=useState('');
-  const [pId,setPId]=useState(properties[0]?.id||'');
-  const [vName,setVName]=useState('');
-  const [answers,setAnswers]=useState({});
-  const [teams,setTeams]=useState(1);
-  const [saving,setSaving]=useState(false);
+// DASHBOARD
+function Dashboard(){
+  return (
+    React.createElement('div',{className:'space-y-6'},
+      React.createElement('h1',{className:'text-2xl font-bold text-slate-800'},'Dashboard'),
 
-  const myV=vendors.filter(v=>{
-    const s=(user.assignedSquadIds||'').toString().split(',').map(x=>x.trim()).filter(Boolean);
-    return s.length===0||s.includes(v.squadId);
-  });
-
-  async function submit(){
-    if(!bId||!vName){alert('Fill Booking ID and Vendor');return;}
-    if(QUESTIONS.some((_,i)=>answers[i]===undefined)){alert('Answer all questions');return;}
-    const yes=QUESTIONS.filter((_,i)=>answers[i]).length;
-    const score=Math.round(yes/QUESTIONS.length*100);
-    const a={id:`a_${Date.now()}`,bookingId:bId,propertyId:pId,supervisorId:user.id,
-      vendorName:vName,datetime:new Date().toISOString(),lat:'18.4655',lng:'73.7280',
-      status:'SUBMITTED',complianceScore:score,activeTeamsCount:teams};
-    setSaving(true);
-    try{
-      await writeSheet('Audits',[a.id,a.bookingId,a.propertyId,a.supervisorId,a.vendorName,
-        a.datetime,a.lat,a.lng,a.status,a.complianceScore,a.activeTeamsCount]);
-      onAdd(a); onClose();
-    }catch(e){alert('Save failed');}
-    finally{setSaving(false);}
-  }
-
-  return h('div',{className:'fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-4'},
-    h('div',{className:'bg-white rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto'},
-      h('div',{className:'p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white'},
-        h('h2',{className:'font-bold text-slate-900'},'📋 New Audit'),
-        h('button',{onClick:onClose,className:'text-slate-400 hover:text-red-500 text-xl'},'✕')
-      ),
-      h('div',{className:'p-5 space-y-3'},
-        h('div',{className:'grid grid-cols-2 gap-3'},
-          h('input',{placeholder:'Booking ID *',value:bId,onChange:e=>setBId(e.target.value),
-            className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'}),
-          h('input',{type:'number',min:1,max:20,value:teams,onChange:e=>setTeams(+e.target.value||1),
-            placeholder:'Teams',className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'})
-        ),
-        h('select',{value:pId,onChange:e=>setPId(e.target.value),
-          className:'w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-          properties.map(p=>h('option',{key:p.id,value:p.id},p.name))
-        ),
-        h('select',{value:vName,onChange:e=>setVName(e.target.value),
-          className:'w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-          h('option',{value:''},'-- Select Vendor --'),
-          ...myV.map(v=>h('option',{key:v.id,value:v.name},v.name))
-        ),
-        h('div',{className:'space-y-2 pt-2'},
-          QUESTIONS.map((q,i)=>
-            h('div',{key:i,className:'flex items-start gap-2 p-3 bg-slate-50 rounded-xl'},
-              h('span',{className:'text-xs text-slate-400 w-5 shrink-0 mt-0.5'},i+1),
-              h('p',{className:'text-xs text-slate-700 flex-1'},q),
-              h('div',{className:'flex gap-1'},
-                h('button',{onClick:()=>setAnswers(a=>({...a,[i]:true})),
-                  className:`px-2 py-1 rounded-lg text-xs font-bold transition-colors ${answers[i]===true?'bg-green-500 text-white':'bg-white border border-slate-200 text-slate-400'}`},'Y'),
-                h('button',{onClick:()=>setAnswers(a=>({...a,[i]:false})),
-                  className:`px-2 py-1 rounded-lg text-xs font-bold transition-colors ${answers[i]===false?'bg-red-500 text-white':'bg-white border border-slate-200 text-slate-400'}`},'N')
-              )
-            )
+      React.createElement('div',{className:'grid grid-cols-3 gap-4'},
+        ['Total Audits','Avg Score','Vendors'].map(t=>
+          React.createElement('div',{className:'card p-4'},
+            React.createElement('p',{className:'text-sm text-slate-500'},t),
+            React.createElement('p',{className:'text-xl font-bold text-slate-800 mt-1'},'--')
           )
-        ),
-        h('button',{onClick:submit,disabled:saving,
-          className:'w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50'},
-          saving?'Saving to Sheets...':'✅ Submit Audit')
+        )
+      ),
+
+      React.createElement('div',{className:'card p-6'},
+        React.createElement('h2',{className:'font-semibold mb-4 text-slate-700'},'Recent Activity'),
+        React.createElement('p',{className:'text-sm text-slate-400'},'No data yet')
       )
     )
-  );
+  )
 }
 
-// ── SUPERVISOR VIEW ──────────────────────────────────────────────────────────
-function SupervisorView({user,data,setData,showToast}){
-  const [tab,setTab]=useState('dash');
-  const [showForm,setShowForm]=useState(false);
-  const [date,setDate]=useState(new Date().toISOString().split('T')[0]);
-  const [allocV,setAllocV]=useState('');
-  const [allocS,setAllocS]=useState('');
-
-  const {audits,vendors,properties,allocations,statusRules}=data;
-  const mine=audits.filter(a=>a.supervisorId===user.id);
-  const avg=mine.length?Math.round(mine.reduce((s,a)=>s+(+a.complianceScore),0)/mine.length):0;
-  const myV=vendors.filter(v=>{
-    const s=(user.assignedSquadIds||'').toString().split(',').map(x=>x.trim()).filter(Boolean);
-    return s.length===0||s.includes(v.squadId);
-  });
-  const todayAlloc=allocations.filter(a=>a.supervisorId===user.id&&a.date===date);
-  const utilized=statusRules.filter(r=>String(r.isUtilized).toUpperCase()==='TRUE');
-
-  async function addAlloc(){
-    if(!allocV||!allocS){alert('Select vendor and status');return;}
-    const al={id:`al_${Date.now()}`,vendorId:allocV,
-      squadId:(user.assignedSquadIds||'').toString().split(',')[0]?.trim()||'',
-      supervisorId:user.id,date,type:allocS,timestamp:new Date().toISOString()};
-    try{
-      await writeSheet('Allocations',[al.id,al.vendorId,al.squadId,al.supervisorId,al.date,al.type,al.timestamp]);
-      setData(d=>({...d,allocations:[...d.allocations,al]}));
-      setAllocV(''); setAllocS('');
-      showToast('Allocation saved!','success');
-    }catch(e){showToast('Failed to save','error');}
-  }
-
-  const tabs=[{id:'dash',label:'📊 Dashboard'},{id:'audits',label:'📋 Audits'},{id:'schedule',label:'📅 Schedule'}];
-
-  return h('div',{className:'max-w-2xl mx-auto p-4 space-y-4 pb-10'},
-    h('div',{className:'flex gap-1 bg-white rounded-2xl p-1 shadow-sm border border-slate-100'},
-      tabs.map(t=>h('button',{key:t.id,onClick:()=>setTab(t.id),
-        className:`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${tab===t.id?'bg-indigo-600 text-white shadow':'text-slate-500 hover:text-indigo-600'}`},t.label))
-    ),
-    tab==='dash'&&h('div',{className:'space-y-4'},
-      h('div',{className:'grid grid-cols-3 gap-3'},
-        h(StatCard,{title:'My Audits',value:mine.length,color:'indigo'}),
-        h(StatCard,{title:'Avg Score',value:`${avg}%`,color:avg>=80?'green':avg>=50?'yellow':'red'}),
-        h(StatCard,{title:'My Vendors',value:myV.length,color:'indigo'})
+// AUDITS PAGE
+function Audits(){
+  return (
+    React.createElement('div',{className:'space-y-6'},
+      React.createElement('div',{className:'flex justify-between items-center'},
+        React.createElement('h1',{className:'text-2xl font-bold text-slate-800'},'Audits'),
+        React.createElement('button',{className:'btn btn-primary'},'+ New Audit')
       ),
-      mine.length>0&&h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100'},
-        h('h3',{className:'font-bold text-slate-800 mb-3 text-sm'},'Recent Audits'),
-        h('div',{className:'space-y-2'},
-          mine.slice(0,5).map(a=>h('div',{key:a.id,className:'flex items-center justify-between p-3 bg-slate-50 rounded-xl'},
-            h('div',null,
-              h('p',{className:'text-sm font-semibold text-slate-800'},a.vendorName),
-              h('p',{className:'text-xs text-slate-400'},a.bookingId)
-            ),
-            h('p',{className:`text-base font-black ${scoreColor(a.complianceScore)}`},`${a.complianceScore}%`)
-          ))
-        )
-      ),
-      mine.length===0&&h('div',{className:'text-center py-16 text-slate-300'},
-        h('div',{className:'text-6xl mb-3'},'📋'),
-        h('p',{className:'text-slate-400'},'No audits yet. Start one from Audits tab!')
-      )
-    ),
-    tab==='audits'&&h('div',{className:'space-y-3'},
-      h('button',{onClick:()=>setShowForm(true),
-        className:'w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200'},
-        '+ Start New Audit'),
-      ...mine.map(a=>h('div',{key:a.id,className:'bg-white rounded-2xl p-4 shadow-sm border border-slate-100'},
-        h('div',{className:'flex items-center justify-between'},
-          h('div',null,
-            h('p',{className:'font-bold text-slate-800'},a.vendorName),
-            h('p',{className:'text-xs text-slate-400 mt-0.5'},`${a.bookingId} · ${new Date(a.datetime).toLocaleDateString()}`)
-          ),
-          h('p',{className:`text-xl font-black ${scoreColor(a.complianceScore)}`},`${a.complianceScore}%`)
-        ),
-        h('div',{className:'mt-2 w-full bg-slate-100 rounded-full h-2'},
-          h('div',{className:`h-2 rounded-full ${scoreBg(a.complianceScore)}`,style:{width:`${a.complianceScore}%`}})
-        )
-      ))
-    ),
-    tab==='schedule'&&h('div',{className:'space-y-4'},
-      h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100 space-y-3'},
-        h('h3',{className:'font-bold text-slate-800 text-sm'},'Vendor Allocation'),
-        h('input',{type:'date',value:date,onChange:e=>setDate(e.target.value),
-          className:'w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'}),
-        h('select',{value:allocV,onChange:e=>setAllocV(e.target.value),
-          className:'w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-          h('option',{value:''},'-- Select Vendor --'),
-          ...myV.map(v=>h('option',{key:v.id,value:v.id},v.name))
-        ),
-        h('select',{value:allocS,onChange:e=>setAllocS(e.target.value),
-          className:'w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-          h('option',{value:''},'-- Select Status --'),
-          ...utilized.map(r=>h('option',{key:r.id,value:r.status},r.status))
-        ),
-        h('button',{onClick:addAlloc,className:'w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl hover:bg-indigo-700 transition-colors'},'+ Add Allocation')
-      ),
-      todayAlloc.length>0&&h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100'},
-        h('h3',{className:'font-bold text-slate-800 text-sm mb-3'},`Allocations — ${date}`),
-        ...todayAlloc.map(a=>{
-          const v=myV.find(vv=>vv.id===a.vendorId);
-          return h('div',{key:a.id,className:'flex items-center justify-between p-3 bg-slate-50 rounded-xl mb-2'},
-            h('div',null,
-              h('p',{className:'text-sm font-semibold text-slate-800'},v?.name||a.vendorId),
-              h('p',{className:'text-xs text-indigo-600 font-bold'},a.type)
-            ),
-            h('button',{onClick:()=>setData(d=>({...d,allocations:d.allocations.filter(x=>!(x.vendorId===a.vendorId&&x.date===a.date))})),
-              className:'text-red-400 hover:text-red-600 text-xs'},'✕')
-          );
-        })
-      )
-    ),
-    showForm&&h(AuditForm,{user,vendors,properties,
-      onAdd:a=>setData(d=>({...d,audits:[a,...d.audits]})),
-      onClose:()=>setShowForm(false)})
-  );
-}
 
-// ── ADMIN VIEW ───────────────────────────────────────────────────────────────
-function AdminView({user,data,setData,showToast}){
-  const [tab,setTab]=useState('overview');
-  const [nN,setNN]=useState('');
-  const [nE,setNE]=useState('');
-  const [nS,setNS]=useState(data.properties[0]?.id||'');
-  const [nT,setNT]=useState('In House Chef');
-  const [saving,setSaving]=useState(false);
-
-  const {audits,vendors,properties,statusRules,users}=data;
-  const avg=audits.length?Math.round(audits.reduce((s,a)=>s+(+a.complianceScore),0)/audits.length):0;
-
-  async function addVendor(){
-    if(!nN){alert('Enter vendor name');return;}
-    const v={id:`v_${Date.now()}`,name:nN,email:nE,squadId:nS,vendorType:nT,numberOfTeams:1};
-    setSaving(true);
-    try{
-      await writeSheet('Vendors',[v.id,v.name,v.email,v.squadId,v.vendorType,v.numberOfTeams]);
-      setData(d=>({...d,vendors:[...d.vendors,v]}));
-      setNN(''); setNE('');
-      showToast('Vendor saved to Sheets!','success');
-    }catch(e){showToast('Failed','error');}
-    finally{setSaving(false);}
-  }
-
-  const tabs=[{id:'overview',label:'📊 Overview'},{id:'audits',label:'📋 Audits'},{id:'vendors',label:'👨‍🍳 Vendors'},{id:'users',label:'👥 Users'},{id:'settings',label:'⚙️ Rules'}];
-
-  return h('div',{className:'max-w-4xl mx-auto p-4 space-y-4 pb-10'},
-    h('div',{className:'flex gap-1 bg-white rounded-2xl p-1 shadow-sm border border-slate-100 overflow-x-auto'},
-      tabs.map(t=>h('button',{key:t.id,onClick:()=>setTab(t.id),
-        className:`flex items-center gap-1 py-2 px-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${tab===t.id?'bg-indigo-600 text-white shadow':'text-slate-500 hover:text-indigo-600'}`},t.label))
-    ),
-    tab==='overview'&&h('div',{className:'space-y-4'},
-      h('div',{className:'grid grid-cols-2 md:grid-cols-4 gap-3'},
-        h(StatCard,{title:'Total Audits',value:audits.length,color:'indigo'}),
-        h(StatCard,{title:'Avg Score',value:`${avg}%`,color:avg>=80?'green':'yellow'}),
-        h(StatCard,{title:'Passed ≥80%',value:audits.filter(a=>+a.complianceScore>=80).length,color:'green'}),
-        h(StatCard,{title:'Failed <50%',value:audits.filter(a=>+a.complianceScore<50).length,color:'red'})
-      ),
-      h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100'},
-        h('h3',{className:'font-bold text-slate-800 text-sm mb-3'},'Latest Audit Scores'),
-        audits.length===0
-          ?h('p',{className:'text-slate-400 text-sm text-center py-6'},'No audits yet')
-          :h('div',{className:'space-y-2'},
-            audits.slice(0,6).map(a=>h('div',{key:a.id,className:'flex items-center justify-between p-3 bg-slate-50 rounded-xl'},
-              h('div',null,
-                h('p',{className:'text-xs font-semibold text-slate-700'},a.vendorName),
-                h('p',{className:'text-xs text-slate-400'},new Date(a.datetime).toLocaleDateString())
-              ),
-              h('span',{className:`text-sm font-black ${scoreColor(a.complianceScore)}`},`${a.complianceScore}%`)
-            ))
-          )
-      )
-    ),
-    tab==='audits'&&h('div',{className:'bg-white rounded-2xl shadow-sm border border-slate-100'},
-      h('div',{className:'p-4 border-b border-slate-100'},h('h3',{className:'font-bold text-slate-800'},`All Audits (${audits.length})`)),
-      audits.length===0
-        ?h('p',{className:'text-center py-12 text-slate-400 text-sm'},'No audits yet')
-        :h('div',null,audits.map(a=>h('div',{key:a.id,className:'p-4 hover:bg-slate-50 border-b border-slate-50'},
-          h('div',{className:'flex items-center justify-between'},
-            h('div',null,
-              h('p',{className:'font-semibold text-slate-800 text-sm'},a.vendorName),
-              h('p',{className:'text-xs text-slate-400'},`${a.bookingId} · ${properties.find(p=>p.id===a.propertyId)?.name||a.propertyId} · ${new Date(a.datetime).toLocaleDateString()}`)
-            ),
-            h('p',{className:`text-lg font-black ${scoreColor(a.complianceScore)}`},`${a.complianceScore}%`)
-          ),
-          h('div',{className:'mt-1.5 w-full bg-slate-100 rounded-full h-1.5'},
-            h('div',{className:`h-1.5 rounded-full ${scoreBg(a.complianceScore)}`,style:{width:`${a.complianceScore}%`}})
-          )
-        )))
-    ),
-    tab==='vendors'&&h('div',{className:'space-y-4'},
-      h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100 space-y-3'},
-        h('h3',{className:'font-bold text-slate-800 text-sm'},'Add New Vendor'),
-        h('div',{className:'grid grid-cols-2 gap-2'},
-          h('input',{placeholder:'Name *',value:nN,onChange:e=>setNN(e.target.value),className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'}),
-          h('input',{placeholder:'Email',value:nE,onChange:e=>setNE(e.target.value),className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'}),
-          h('select',{value:nS,onChange:e=>setNS(e.target.value),className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-            properties.map(p=>h('option',{key:p.id,value:p.id},p.name))
-          ),
-          h('select',{value:nT,onChange:e=>setNT(e.target.value),className:'px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500'},
-            ['In House Chef','Stand Alone','Delivery','MG','Facility Management'].map(t=>h('option',{key:t,value:t},t))
-          )
-        ),
-        h('button',{onClick:addVendor,disabled:saving,className:'w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50'},saving?'Saving...':'+ Add Vendor')
-      ),
-      h('div',{className:'bg-white rounded-2xl shadow-sm border border-slate-100'},
-        h('div',{className:'p-4 border-b border-slate-100'},h('h3',{className:'font-bold text-slate-800'},`Vendors (${vendors.length})`)),
-        vendors.map(v=>h('div',{key:v.id,className:'p-4 flex items-center justify-between hover:bg-slate-50 border-b border-slate-50'},
-          h('div',{className:'flex items-center gap-3'},
-            h('div',{className:'w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm'},v.name?.charAt(0)),
-            h('div',null,
-              h('p',{className:'text-sm font-semibold text-slate-800'},v.name),
-              h('p',{className:'text-xs text-slate-400'},`${v.vendorType} · ${properties.find(p=>p.id===v.squadId)?.name||v.squadId}`)
-            )
-          ),
-          h('button',{onClick:()=>setData(d=>({...d,vendors:d.vendors.filter(x=>x.id!==v.id)})),className:'text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded-lg hover:bg-red-50'},'Remove')
-        ))
-      )
-    ),
-    tab==='users'&&h('div',{className:'bg-white rounded-2xl shadow-sm border border-slate-100'},
-      h('div',{className:'p-4 border-b border-slate-100'},h('h3',{className:'font-bold text-slate-800'},`Users (${users.length})`)),
-      users.map(u=>h('div',{key:u.id,className:'p-4 flex items-center justify-between hover:bg-slate-50 border-b border-slate-50'},
-        h('div',{className:'flex items-center gap-3'},
-          h('div',{className:'w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold'},u.name?.charAt(0)||'?'),
-          h('div',null,
-            h('p',{className:'text-sm font-semibold text-slate-800'},u.name),
-            h('p',{className:'text-xs text-slate-400'},u.phone)
-          )
-        ),
-        h('span',{className:'text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-bold'},u.role)
-      ))
-    ),
-    tab==='settings'&&h('div',{className:'space-y-4'},
-      h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100'},
-        h('h3',{className:'font-bold text-slate-800 text-sm mb-3'},'Status Rules'),
-        h('div',{className:'grid grid-cols-2 gap-2'},
-          statusRules.map(r=>h('div',{key:r.id,className:'flex items-center justify-between p-3 bg-slate-50 rounded-xl'},
-            h('span',{className:'text-xs font-semibold text-slate-700'},r.status),
-            h('span',{className:`text-xs px-2 py-0.5 rounded-full font-bold ${String(r.isUtilized).toUpperCase()==='TRUE'?'bg-green-100 text-green-700':'bg-slate-100 text-slate-400'}`},
-              String(r.isUtilized).toUpperCase()==='TRUE'?'On':'Off')
-          ))
-        )
-      ),
-      h('div',{className:'bg-white rounded-2xl p-5 shadow-sm border border-slate-100'},
-        h('h3',{className:'font-bold text-slate-800 text-sm mb-3'},'Properties'),
-        h('div',{className:'grid grid-cols-2 gap-2'},
-          properties.map(p=>h('div',{key:p.id,className:'p-3 bg-slate-50 rounded-xl'},
-            h('p',{className:'text-sm font-semibold text-slate-700'},p.name),
-            h('p',{className:'text-xs text-slate-400'},p.city)
-          ))
-        )
-      )
+      React.createElement('div',{className:'card p-6 text-sm text-slate-400'},'No audits yet')
     )
-  );
+  )
 }
 
-// ── ROOT APP ─────────────────────────────────────────────────────────────────
+// VENDORS PAGE
+function Vendors(){
+  return (
+    React.createElement('div',{className:'space-y-6'},
+      React.createElement('h1',{className:'text-2xl font-bold text-slate-800'},'Vendors'),
+      React.createElement('div',{className:'card p-6 text-sm text-slate-400'},'No vendors yet')
+    )
+  )
+}
+
+// MAIN APP LAYOUT
 function App(){
   const [user,setUser]=useState(null);
-  const [loading,setLoading]=useState(true);
-  const [syncing,setSyncing]=useState(false);
-  const [toast,setToast]=useState(null);
-  const [data,setData]=useState({users:[],properties:[],vendors:[],statusRules:[],audits:[],allocations:[]});
+  const [tab,setTab]=useState('dashboard');
 
-  function showToast(m,t='info'){setToast({m,t,k:Date.now()});}
+  if(!user) return React.createElement(Login,{onLogin:setUser});
 
-  async function load(){
-    try{
-      const [u,p,v,sr,a,al]=await Promise.all([
-        readSheet('Users'),readSheet('Properties'),readSheet('Vendors'),
-        readSheet('StatusRules'),readSheet('Audits'),readSheet('Allocations')
-      ]);
-      setData({users:u||[],properties:p||[],vendors:v||[],statusRules:sr||[],audits:a||[],allocations:al||[]});
-    }catch(e){showToast('Could not connect to Google Sheets','error');}
-    finally{setLoading(false);setSyncing(false);}
-  }
+  return (
+    React.createElement('div',{className:'flex min-h-screen'},
 
-  useEffect(()=>{load();},[]);
+      // SIDEBAR
+      React.createElement('div',{className:'sidebar p-4 space-y-2'},
+        React.createElement('div',{className:'text-lg font-bold text-slate-800 mb-6'},'Chef Alliance'),
 
-  if(loading)return h('div',{className:'min-h-screen flex flex-col items-center justify-center gap-3 bg-slate-50'},
-    h('div',{className:'w-8 h-8 border-4 border-slate-200 border-t-indigo-600 rounded-full spin'}),
-    h('p',{className:'text-sm text-slate-400'},'Loading...')
-  );
-
-  if(!user)return h(LoginScreen,{onLogin:setUser});
-
-  return h('div',{className:'min-h-screen bg-slate-50'},
-    h('header',{className:'bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-40 shadow-sm'},
-      h('div',{className:'max-w-4xl mx-auto flex items-center justify-between'},
-        h('div',{className:'flex items-center gap-3'},
-          h('div',{className:'bg-indigo-600 p-2 rounded-xl text-white text-lg'},'👨‍🍳'),
-          h('div',null,
-            h('p',{className:'font-bold text-slate-900 text-sm'},'Chef Alliance'),
-            h('p',{className:'text-xs text-slate-400'},'Compliance Platform')
-          )
-        ),
-        h('div',{className:'flex items-center gap-2'},
-          h('span',{className:'text-xs text-slate-500 hidden sm:block'},user.name),
-          h('button',{
-            onClick:async()=>{setSyncing(true);await load();showToast('Synced!','success');},
-            className:'p-2 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors text-sm',
-            title:'Sync from Google Sheets'
-          }, syncing?'⏳':'🔄'),
-          h('span',{className:'text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full font-bold hidden sm:block'},user.role),
-          h('button',{onClick:()=>setUser(null),className:'p-2 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors text-sm'},'🚪')
+        ['dashboard','audits','vendors'].map(t=>
+          React.createElement('div',{
+            key:t,
+            onClick:()=>setTab(t),
+            className:`nav-item ${tab===t?'nav-active':''}`
+          },t.charAt(0).toUpperCase()+t.slice(1))
         )
+      ),
+
+      // CONTENT
+      React.createElement('div',{className:'flex-1 p-6'},
+        React.createElement('div',{className:'flex justify-between items-center mb-6'},
+          React.createElement('span',{className:'text-sm text-slate-500'},`Welcome, ${user.name}`),
+          React.createElement('button',{onClick:()=>setUser(null),className:'text-sm text-red-500'},'Logout')
+        ),
+
+        tab==='dashboard' && React.createElement(Dashboard),
+        tab==='audits' && React.createElement(Audits),
+        tab==='vendors' && React.createElement(Vendors)
       )
-    ),
-    h('main',{className:'py-4'},
-      user.role==='ADMIN'
-        ?h(AdminView,{user,data,setData,showToast})
-        :h(SupervisorView,{user,data,setData,showToast})
-    ),
-    toast&&h(Toast,{key:toast.k,message:toast.m,type:toast.t,onClose:()=>setToast(null)})
-  );
+    )
+  )
 }
 
-createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(App)));
+createRoot(document.getElementById('root')).render(React.createElement(App));
 </script>
 </body>
 </html>
